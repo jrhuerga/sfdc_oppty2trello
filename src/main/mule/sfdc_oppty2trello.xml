@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:trello="http://www.mulesoft.org/schema/mule/trello" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:salesforce="http://www.mulesoft.org/schema/mule/salesforce" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/salesforce http://www.mulesoft.org/schema/mule/salesforce/current/mule-salesforce.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/trello http://www.mulesoft.org/schema/mule/trello/current/mule-trello.xsd">
+	<salesforce:sfdc-config name="Salesforce_Config" doc:name="Salesforce Config" doc:id="8b0e1a0f-029f-4db0-952e-ea892487bcf7" >
+		<salesforce:basic-connection username="SFDC_user" password="SFDC_password" securityToken="T389DJt1ZREzsKuUukXm8cXbW" />
+	</salesforce:sfdc-config>
+	<trello:config name="Trello_Connector_Config" doc:name="Trello Connector Config" doc:id="100a0601-069d-453f-9806-ab9663657bae" >
+		<trello:api-key-connection key="e49b32aecf059298e53ae33f4ec38fca" token="8612210ef45c4cb4fj9ed3c6f734f285056897b1z70d40ad5793b6ebf3e51ye3" />
+	</trello:config>
+	<flow name="sfdc_oppty2trelloFlow" doc:id="ecc49ed2-4c0a-4de8-a3c7-2985e10ca7cd" >
+		<scheduler doc:name="Scheduler" doc:id="55279f92-54fc-43b2-98e8-e0c9b9c812c0" >
+			<scheduling-strategy >
+				<fixed-frequency frequency="30" timeUnit="SECONDS"/>
+			</scheduling-strategy>
+		</scheduler>
+		<salesforce:query doc:id="9f2b2643-3195-491d-be5e-8b799100b46a" config-ref="Salesforce_Config" doc:name="Oppty won today" >
+			<salesforce:salesforce-query ><![CDATA[SELECT Id, Name, account.name, LastModifiedDate from Opportunity where IsClosed = true and IsWon = true and LastModifiedDate = TODAY]]></salesforce:salesforce-query>
+		</salesforce:query>
+		<choice doc:name="Check Oppties" doc:id="086e7d44-32ce-4748-9382-35686eed93de" >
+			<when expression="#[sizeOf(payload) &gt; 0]" >
+				<os:contains doc:id="390e0330-d980-4d00-89a0-63fa3a7fa353" key="#[payload.Id[0]]" target="found" doc:name="Oppties found" />
+				<choice doc:name="Check Object Store" doc:id="14a66dee-bee1-4cdb-a4cc-71aa97751640" >
+					<when expression="vars.found == true" >
+						<set-payload value='#[%dw 2.0
+&#10;output application/json
+&#10;---
+&#10;{
+&#10;	message: "Opportunities already sent to Trello"
+&#10;}]' doc:name="Already in ObjectStore" doc:id="d623adf7-296c-4f16-ad4e-3c2596663691" />
+					</when>
+					<otherwise >
+						<os:store doc:id="4898a450-77ed-4487-87ff-00ce41536e4e" key="#[payload.Id[0]]" doc:name="Store Oppty ID" >
+							<os:value ><![CDATA[#["saved"]]]></os:value>
+						</os:store>
+						<ee:transform doc:name="Trello payload" doc:id="11e9da1e-8aa9-43a6-b5d0-90f5fb927242" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	name: payload.Name[0] default "",
+	desc: payload.Account.Name[0] default "",
+	pos: "top", 
+    idList: "60846c61c4fcce5eb456f4a5"	
+}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+						<trello:create-cards doc:id="ebeb4d94-60fa-4a7b-ae3e-efabaa2150ba" config-ref="Trello_Connector_Config" doc:name="Create card on Trello" />
+						<ee:transform doc:name="Confirm in log" doc:id="d4904523-f947-4a0b-80c0-a8f33570b218" >
+							<ee:message >
+								<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+	"name": payload.name,
+	"url": payload.url
+}]]></ee:set-payload>
+							</ee:message>
+						</ee:transform>
+					</otherwise>
+				</choice>
+			</when>
+			<otherwise >
+				<set-payload value='#[%dw 2.0
+&#10;output application/json
+&#10;---
+&#10;{
+&#10;	message: "There are no new opportunities won today"
+&#10;}]' doc:name="No oppties today" doc:id="5682aa3b-f3ea-4384-9be7-64aa1a58fd21" />
+			</otherwise>
+		</choice>
+		<logger level="INFO" doc:name="Write output" doc:id="a242bba3-c789-49a7-be41-09bb3829072c" message="#[payload]" />
+	</flow>
+</mule>
